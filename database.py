@@ -226,3 +226,18 @@ def load_attendance(conn=None, work_date=None):
     if owns_connection:
         conn.close()
     return records
+
+
+def delete_attendance(conn=None, record_id=None):
+    if not record_id:
+        return False
+    owns_connection = conn is None
+    if conn is None:
+        conn = init_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM attendance_records WHERE id = ?", (record_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    if owns_connection:
+        conn.close()
+    return deleted

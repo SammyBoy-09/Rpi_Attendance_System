@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { CalendarDays, Download } from "lucide-react";
+import { CalendarDays, Download, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Avatar, StatusBadge } from "./index";
 import { Button } from "@/components/ui/button";
@@ -15,12 +16,23 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   durationLabel,
   formatTime,
   localDateKey,
   type AttendanceWithEmployee,
 } from "@/lib/attendance";
-import { fetchAttendance } from "@/lib/api";
+import { deleteAttendance, fetchAttendance } from "@/lib/api";
 
 export const Route = createFileRoute("/records")({
   head: () => ({
@@ -43,10 +55,22 @@ export const Route = createFileRoute("/records")({
 
 function RecordsPage() {
   const [date, setDate] = useState(localDateKey());
+  const queryClient = useQueryClient();
 
   const { data: records = [], isLoading } = useQuery({
     queryKey: ["attendance", date],
     queryFn: () => fetchAttendance(date),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (recordId: string) => deleteAttendance(recordId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["attendance"] });
+      toast.success("Attendance record deleted");
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Failed to delete record");
+    },
   });
 
   function exportCsv() {
@@ -120,7 +144,8 @@ function RecordsPage() {
                 <TableHead>Check in</TableHead>
                 <TableHead>Check out</TableHead>
                 <TableHead className="hidden sm:table-cell">Hours</TableHead>
-                <TableHead className="text-right">Status</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="w-12 text-right"><span className="sr-only">Actions</span></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -152,8 +177,39 @@ function RecordsPage() {
                   <TableCell className="hidden sm:table-cell font-mono tabular-nums">
                     {durationLabel(r.check_in, r.check_out)}
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell>
                     <StatusBadge record={r} />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 text-muted-foreground hover:text-destructive"
+                          title="Delete record"
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete attendance record?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will permanently remove the attendance record for {r.employees?.full_name ?? "this entry"} on {r.work_date}.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            onClick={() => deleteMutation.mutate(r.id)}
+                          >
+                            Delete
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </TableCell>
                 </TableRow>
               ))}

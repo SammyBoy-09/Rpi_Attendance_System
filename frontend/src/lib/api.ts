@@ -69,6 +69,13 @@ export async function fetchAttendance(date: string): Promise<AttendanceWithEmplo
   return requestJson<AttendanceWithEmployee[]>(`/api/attendance?date=${encodeURIComponent(date)}`);
 }
 
+export async function deleteAttendance(recordId: string): Promise<void> {
+  await requestJson<{ ok: boolean }>(`/api/attendance/${recordId}`, {
+    method: "DELETE",
+  });
+}
+
+
 export async function scanAttendance(): Promise<{
   kind: "in" | "out" | "done" | "unknown";
   employee?: Employee;
@@ -83,6 +90,30 @@ export async function scanAttendance(): Promise<{
     distance?: number;
     faces_detected?: number;
   }>("/api/attendance/scan", {
+    method: "POST",
+  });
+}
+
+export type BatchResultItem = {
+  status: "recognized" | "unknown";
+  kind?: "in" | "out" | "done";
+  distance?: number;
+  confidence?: number;
+  employee?: Employee;
+  record?: AttendanceRecord;
+  box: { x: number; y: number; width: number; height: number };
+};
+
+export type BatchScanResponse = {
+  total_faces: number;
+  recognized_count: number;
+  unknown_count: number;
+  results: BatchResultItem[];
+  annotated_photo: string;
+};
+
+export async function scanBatchAttendance(): Promise<BatchScanResponse> {
+  return requestJson<BatchScanResponse>("/api/attendance/scan-batch", {
     method: "POST",
   });
 }

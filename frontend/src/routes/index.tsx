@@ -1,18 +1,20 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
   Clock,
   LogOut,
   ScanFace,
+  Trash2,
   TrendingUp,
   UserCheck,
   Users,
 } from "lucide-react";
+import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { fetchAttendance, fetchEmployees } from "@/lib/api";
+import { deleteAttendance, fetchAttendance, fetchEmployees } from "@/lib/api";
 import {
   durationLabel,
   formatTime,
@@ -78,6 +80,7 @@ function StatCard({
 
 function Dashboard() {
   const today = localDateKey();
+  const queryClient = useQueryClient();
 
   const { data: employees = [] } = useQuery({
     queryKey: ["employees-count"],
@@ -89,6 +92,23 @@ function Dashboard() {
     queryFn: () => fetchAttendance(today),
     refetchInterval: 15000,
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: (recordId: string) => deleteAttendance(recordId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["attendance"] });
+      toast.success("Attendance entry deleted");
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Failed to delete entry");
+    },
+  });
+
+  const handleDelete = (recordId: string, name: string) => {
+    if (confirm(`Are you sure you want to delete the attendance entry for ${name}?`)) {
+      deleteMutation.mutate(recordId);
+    }
+  };
 
   const present = records.length;
   const onSite = records.filter((r) => !r.check_out).length;
@@ -161,7 +181,7 @@ function Dashboard() {
           ) : (
             <ul className="divide-y divide-border">
               {records.map((r) => (
-                <li key={r.id} className="flex items-center gap-4 px-5 py-3.5">
+                <li key={r.id} className="group flex items-center gap-4 px-5 py-3.5">
                   <Avatar
                     src={r.employees?.photo_url ?? null}
                     name={r.employees?.full_name ?? "?"}
@@ -182,7 +202,18 @@ function Dashboard() {
                       {durationLabel(r.check_in, r.check_out)}
                     </p>
                   </div>
-                  <StatusBadge record={r} />
+                  <div className="flex items-center gap-2">
+                    <StatusBadge record={r} />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-8 text-muted-foreground hover:text-destructive opacity-80 hover:opacity-100"
+                      title="Delete entry"
+                      onClick={() => handleDelete(r.id, r.employees?.full_name ?? "this entry")}
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
                 </li>
               ))}
             </ul>

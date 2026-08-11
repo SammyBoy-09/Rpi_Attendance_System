@@ -18,7 +18,7 @@ CORS(app)
 
 camera_lock = threading.Lock()
 picam2 = Picamera2()
-config = picam2.create_video_configuration(main={"size": (640, 480), "format": "RGB888"})
+config = picam2.create_video_configuration(main={"size": (1280, 960), "format": "RGB888"})
 picam2.configure(config)
 picam2.start()
 time.sleep(2)
@@ -64,7 +64,9 @@ def capture_frame() -> np.ndarray:
 def jpeg_stream():
     while True:
         frame = capture_frame()
-        ret, buffer = cv2.imencode(".jpg", frame)
+        # Downscale for smooth streaming network performance
+        stream_frame = cv2.resize(frame, (640, 480))
+        ret, buffer = cv2.imencode(".jpg", stream_frame)
         if not ret:
             time.sleep(0.01)
             continue
@@ -132,6 +134,98 @@ def detect_single_face(frame: np.ndarray, scale: float = 0.25):
         "width": right - left,
         "height": bottom - top,
     }
+
+
+def detect_multiple_faces(frame: np.ndarray, scale: float = 0.5):
+    """
+    Detect all faces in a high-resolution frame (1280x960).
+    Runs multi-scale face location detection for high accuracy classroom recognition.
+    """
+    small_frame = cv2.resize(frame, (0, 0), fx=scale, fy=scale)
+    face_locations_small = face_recognition.face_locations(small_frame, number_of_times_to_upsample=1, model="hog")
+    
+    scaled_face_locations = [
+        (
+            int(top / scale),
+            int(right / scale),
+            int(bottom / scale),
+            int(left / scale),
+        )
+        for top, right, bottom, left in face_locations_small
+    ]
+    
+    if not scaled_face_locations:
+        return [], []
+
+    face_encodings = face_recognition.face_encodings(frame, scaled_face_locations)
+    
+    detected = []
+    for encoding, (top, right, bottom, left) in zip(face_encodings, scaled_face_locations):
+        detected.append({
+            "encoding": encoding,
+            "box": {
+                "x": left,
+                "y": top,
+                "width": right - left,
+                "height": bottom - top,
+            },
+            "location": (top, right, bottom, left),
+        })
+        
+    return detected, scaled_face_locations
+
+
+def annotate_frame_with_results(frame: np.ndarray, results: list) -> str:
+    """Draw bounding boxes and status labels on captured frame using OpenCV."""
+    annotated = frame.copy()
+    
+    for item in results:
+        box = item["box"]
+        x, y, w, h = box["x"], box["y"], box["width"], box["height"]
+        
+        if item.get("status") == "recognized":
+            color = (50, 205, 50)  # Lime Green
+            emp = item.get("employee", {})
+            kind = str(item.get("kind", "")).upper()
+            status_text = f"{emp.get('full_name', 'Student')} [{kind}]"
+        else:
+            color = (50, 50, 240)  # Red
+            status_text = "Unknown Face"
+            
+        # Draw bounding box
+        cv2.rectangle(annotated, (x, y), (x + w, y + h), color, 3)
+        
+        # Draw label header
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.65
+        thickness = 2
+        (text_width, text_height), baseline = cv2.getTextSize(status_text, font, font_scale, thickness)
+        
+        label_y = max(y - 10, text_height + 10)
+        cv2.rectangle(
+            annotated,
+            (x, label_y - text_height - 8),
+            (x + text_width + 12, label_y + 4),
+            color,
+            -1,  # Filled box
+        )
+        cv2.putText(
+            annotated,
+            status_text,
+            (x + 6, label_y - 2),
+            font,
+            font_scale,
+            (255, 255, 255),
+            thickness,
+            cv2.LINE_AA,
+        )
+        
+    ret, buffer = cv2.imencode(".jpg", annotated)
+    if not ret:
+        return ""
+    import base64
+    encoded = base64.b64encode(buffer.tobytes()).decode("ascii")
+    return f"data:image/jpeg;base64,{encoded}"
 
 
 def capture_face_payload():
@@ -392,6 +486,15 @@ def get_attendance():
     return jsonify(load_attendance_for_date(work_date))
 
 
+@app.delete("/api/attendance/<record_id>")
+def delete_attendance_record(record_id: str):
+    success = database.delete_attendance(record_id=record_id)
+    if not success:
+        return jsonify({"error": "attendance record not found"}), 404
+    return jsonify({"ok": True})
+
+
+
 @app.post("/api/attendance/scan")
 def scan_attendance():
     frame = capture_frame()
@@ -443,6 +546,82 @@ def scan_attendance():
     )
 
 
+@app.route("/api/attendance/scan-batch", methods=["GET", "POST"])
+def scan_batch_attendance():
+    frame = capture_frame()
+    detected, _ = detect_multiple_faces(frame, scale=0.5)
+    
+    if not detected:
+        return jsonify({
+            "total_faces": 0,
+            "recognized_count": 0,
+            "unknown_count": 0,
+            "results": [],
+            "annotated_photo": annotate_frame_with_results(frame, []),
+        })
+        
+    employees = get_active_employees_cached()
+    candidates = [e for e in employees if e.get("face_descriptor")]
+    
+    conn = database.init_db()
+    results = []
+    recognized_count = 0
+    unknown_count = 0
+    tolerance = 0.5
+    
+    for item in detected:
+        encoding = item["encoding"]
+        box = item["box"]
+        best = face_distance_match(encoding, candidates)
+        
+        if best is not None and best["distance"] <= tolerance:
+            emp = best["employee"]
+            conf = round(max(0.0, 1.0 - best["distance"]), 3)
+            kind, attendance_row = get_or_create_attendance(
+                conn,
+                emp["id"],
+                today_key(),
+                confidence=conf,
+            )
+            record = database.row_to_attendance(attendance_row)
+            record["employees"] = {
+                "full_name": emp["full_name"],
+                "employee_code": emp["employee_code"],
+                "department": emp["department"],
+                "job_title": emp["job_title"],
+                "photo_url": emp["photo_url"],
+            }
+            results.append({
+                "status": "recognized",
+                "kind": kind,
+                "distance": best["distance"],
+                "confidence": conf,
+                "employee": emp,
+                "record": record,
+                "box": box,
+            })
+            recognized_count += 1
+        else:
+            results.append({
+                "status": "unknown",
+                "distance": best["distance"] if best else None,
+                "box": box,
+            })
+            unknown_count += 1
+            
+    conn.close()
+    
+    annotated_photo = annotate_frame_with_results(frame, results)
+    
+    return jsonify({
+        "total_faces": len(detected),
+        "recognized_count": recognized_count,
+        "unknown_count": unknown_count,
+        "results": results,
+        "annotated_photo": annotated_photo,
+    })
+
+
 @app.get("/")
 def index():
     return jsonify(
@@ -455,6 +634,7 @@ def index():
                 "camera_stream": "/api/camera/stream",
                 "capture_face": "/api/employees/capture-face",
                 "scan": "/api/attendance/scan",
+                "scan_batch": "/api/attendance/scan-batch",
             },
         }
     )
