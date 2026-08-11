@@ -175,8 +175,85 @@ def detect_multiple_faces(frame: np.ndarray, scale: float = 0.5):
     return detected, scaled_face_locations
 
 
+def draw_camera_focus_reticle(img: np.ndarray, x: int, y: int, w: int, h: int, color: tuple):
+    """Draw high-contrast modern camera corner brackets (Sony/Canon mirrorless style)."""
+    line_len = max(16, min(w, h) // 4)
+    thickness = 2
+    
+    # Render black outline shadow underneath for crisp contrast against any background
+    for t, c in [(thickness + 2, (0, 0, 0)), (thickness, color)]:
+        # Top-Left corner
+        cv2.line(img, (x, y), (x + line_len, y), c, t)
+        cv2.line(img, (x, y), (x, y + line_len), c, t)
+        # Top-Right corner
+        cv2.line(img, (x + w, y), (x + w - line_len, y), c, t)
+        cv2.line(img, (x + w, y), (x + w, y + line_len), c, t)
+        # Bottom-Left corner
+        cv2.line(img, (x, y + h), (x + line_len, y + h), c, t)
+        cv2.line(img, (x, y + h), (x, y + h - line_len), c, t)
+        # Bottom-Right corner
+        cv2.line(img, (x + w, y + h), (x + w - line_len, y + h), c, t)
+        cv2.line(img, (x + w, y + h), (x + w, y + h - line_len), c, t)
+
+
+def draw_hud_badge(img: np.ndarray, x: int, y: int, status_text: str, color: tuple):
+    """Draw a dark floating HUD badge with status dot indicator."""
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.55
+    thickness = 1
+    
+    (text_w, text_h), _ = cv2.getTextSize(status_text, font, font_scale, thickness)
+    
+    dot_radius = 4
+    dot_gap = 8
+    padding_x = 10
+    padding_y = 6
+    
+    total_w = padding_x * 2 + dot_radius * 2 + dot_gap + text_w
+    total_h = max(text_h, dot_radius * 2) + padding_y * 2
+    
+    badge_y = max(y - total_h - 8, 8)
+    badge_x = max(x, 8)
+    
+    # Draw dark HUD pill background (sleek charcoal gray)
+    cv2.rectangle(
+        img,
+        (badge_x, badge_y),
+        (badge_x + total_w, badge_y + total_h),
+        (22, 25, 32),
+        -1,  # Filled
+    )
+    # Draw thin color border matching status
+    cv2.rectangle(
+        img,
+        (badge_x, badge_y),
+        (badge_x + total_w, badge_y + total_h),
+        color,
+        1,
+    )
+    
+    # Draw status indicator dot
+    dot_cx = badge_x + padding_x + dot_radius
+    dot_cy = badge_y + total_h // 2
+    cv2.circle(img, (dot_cx, dot_cy), dot_radius, color, -1)
+    
+    # Draw text label
+    text_x = dot_cx + dot_radius + dot_gap
+    text_y = badge_y + (total_h + text_h) // 2 - 1
+    cv2.putText(
+        img,
+        status_text,
+        (text_x, text_y),
+        font,
+        font_scale,
+        (240, 245, 250),
+        thickness,
+        cv2.LINE_AA,
+    )
+
+
 def annotate_frame_with_results(frame: np.ndarray, results: list) -> str:
-    """Draw bounding boxes and status labels on captured frame using OpenCV."""
+    """Draw modern camera focus reticles and HUD badges on captured classroom frame."""
     annotated = frame.copy()
     
     for item in results:
@@ -184,41 +261,19 @@ def annotate_frame_with_results(frame: np.ndarray, results: list) -> str:
         x, y, w, h = box["x"], box["y"], box["width"], box["height"]
         
         if item.get("status") == "recognized":
-            color = (50, 205, 50)  # Lime Green
+            color = (80, 220, 100)  # Emerald Green
             emp = item.get("employee", {})
             kind = str(item.get("kind", "")).upper()
             status_text = f"{emp.get('full_name', 'Student')} [{kind}]"
         else:
-            color = (50, 50, 240)  # Red
-            status_text = "Unknown Face"
+            color = (70, 70, 240)  # Crimson Red
+            status_text = "Unrecognized"
             
-        # Draw bounding box
-        cv2.rectangle(annotated, (x, y), (x + w, y + h), color, 3)
+        # Draw camera reticle corner brackets
+        draw_camera_focus_reticle(annotated, x, y, w, h, color)
         
-        # Draw label header
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.65
-        thickness = 2
-        (text_width, text_height), baseline = cv2.getTextSize(status_text, font, font_scale, thickness)
-        
-        label_y = max(y - 10, text_height + 10)
-        cv2.rectangle(
-            annotated,
-            (x, label_y - text_height - 8),
-            (x + text_width + 12, label_y + 4),
-            color,
-            -1,  # Filled box
-        )
-        cv2.putText(
-            annotated,
-            status_text,
-            (x + 6, label_y - 2),
-            font,
-            font_scale,
-            (255, 255, 255),
-            thickness,
-            cv2.LINE_AA,
-        )
+        # Draw floating HUD badge label
+        draw_hud_badge(annotated, x, y, status_text, color)
         
     ret, buffer = cv2.imencode(".jpg", annotated)
     if not ret:
