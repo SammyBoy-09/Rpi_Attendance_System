@@ -38,9 +38,9 @@ export const Route = createFileRoute("/kiosk")({
 
 type Outcome = {
   kind: "in" | "out" | "done" | "unknown";
-  employee?: Employee;
-  record?: AttendanceRecord;
-  distance?: number;
+  employee?: Employee | undefined;
+  record?: AttendanceRecord | undefined;
+  distance?: number | undefined;
   at: number;
 };
 
@@ -167,11 +167,9 @@ function KioskPage() {
             className="aspect-video"
             overlay={
               scanning ? (
-                <div className="absolute inset-0 flex items-center justify-center bg-background/70">
-                  <span className="flex items-center gap-2 text-sm">
-                    <Loader2 className="size-4 animate-spin text-primary" />
-                    Scanning against local database…
-                  </span>
+                <div className="absolute top-4 left-4 flex items-center gap-2 rounded-full border border-primary/40 bg-background/85 px-3.5 py-1.5 text-xs font-medium backdrop-blur-md shadow-md">
+                  <Loader2 className="size-3.5 animate-spin text-primary" />
+                  Scanning face against local database…
                 </div>
               ) : null
             }

@@ -1,4 +1,5 @@
 import time
+import cv2
 import numpy as np
 import face_recognition
 from picamera2 import Picamera2
@@ -43,11 +44,17 @@ def recognize_faces():
         while True:
             frame = picam2.capture_array()
             
-            # Find all faces in the current frame
-            face_locations = face_recognition.face_locations(frame)
-            face_encodings = face_recognition.face_encodings(frame, face_locations)
+            # Downscale frame for fast detection
+            small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+            face_locations_small = face_recognition.face_locations(small_frame)
             
-            if len(face_locations) == 0:
+            scaled_locations = [
+                (int(top / 0.25), int(right / 0.25), int(bottom / 0.25), int(left / 0.25))
+                for top, right, bottom, left in face_locations_small
+            ]
+            face_encodings = face_recognition.face_encodings(frame, scaled_locations)
+            
+            if len(scaled_locations) == 0:
                 print("Scanning...")
             
             # Loop through each face found in the frame

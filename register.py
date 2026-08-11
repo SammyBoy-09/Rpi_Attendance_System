@@ -1,4 +1,5 @@
 import time
+import cv2
 import numpy as np
 import face_recognition
 from picamera2 import Picamera2
@@ -39,20 +40,26 @@ def register_user():
     while len(encodings) < target_captures:
         frame = picam2.capture_array()
         
-        # Detect all faces in the current frame
-        face_locations = face_recognition.face_locations(frame)
+        # Detect all faces in the current frame using downscaled image
+        small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+        face_locations_small = face_recognition.face_locations(small_frame)
         
-        if len(face_locations) == 0:
+        scaled_locations = [
+            (int(top / 0.25), int(right / 0.25), int(bottom / 0.25), int(left / 0.25))
+            for top, right, bottom, left in face_locations_small
+        ]
+        
+        if len(scaled_locations) == 0:
             print("No face detected. Keep looking at the camera...")
-        elif len(face_locations) > 1:
+        elif len(scaled_locations) > 1:
             print("Multiple faces detected! Please ensure only one person is in frame.")
         else:
             # Exactly one face found - extract the 128-d encoding
             print(f"Face acquired! Capturing {len(encodings) + 1}/{target_captures}...")
-            face_encoding = face_recognition.face_encodings(frame, face_locations)[0]
+            face_encoding = face_recognition.face_encodings(frame, scaled_locations)[0]
             encodings.append(face_encoding)
             
-        time.sleep(1) # Pause slightly between captures to get minor variations in angle
+        time.sleep(0.3) # Pause slightly between captures to get minor variations in angle
 
     picam2.stop()
     
